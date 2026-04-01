@@ -57,9 +57,7 @@ const promptConfig = async () => {
 };
 
 const getFiles = () =>
-    globby("./input", {
-        expandDirectories: { extensions: ["jpg", "jpeg", "png", "webp"] },
-    });
+    globby("./input/**/*.{jpg,jpeg,png,webp}");
 
 const compressImage = async (file, format, { quality, maxWidth, maxHeight }) => {
     const parts = file.split("/");
