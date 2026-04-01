@@ -1,79 +1,107 @@
 import { globby } from "globby";
 import sharp from "sharp";
 import fs from "fs";
+import inquirer from "inquirer";
 
-// config
-const input = "./input";
-const output = "./output";
-const extensionOutput = ".webp";
-
-// get files
-const getFiles = async () => {
-    const paths = await globby(input, {
-        expandDirectories: {
-            extensions: ["jpg", "jpeg", "png"],
-        },
-    });
-    return paths;
+const DEFAULTS = {
+    formats: ["webp"],
+    quality: 75,
+    maxWidth: 2560,
+    maxHeight: 2560,
 };
 
-// compres image
-async function compressImage(file) {
-    const item = file.split("/");
-    const image = item.pop();
-    const removeImageExt = image.split(".");
-    item.shift();
-    const dir = item.join("/");
+const promptConfig = async () => {
+    const { useDefaults } = await inquirer.prompt([
+        {
+            type: "confirm",
+            name: "useDefaults",
+            message: `Use defaults? (formats: ${DEFAULTS.formats.join(", ").toUpperCase()}, quality: ${DEFAULTS.quality}, max size: ${DEFAULTS.maxWidth}x${DEFAULTS.maxHeight})`,
+            default: true,
+        },
+    ]);
 
-    if (!fs.existsSync(`${output}/${dir}`)) {
-        fs.mkdirSync(`${output}/${dir}`, { recursive: true });
+    if (useDefaults) return DEFAULTS;
+
+    return inquirer.prompt([
+        {
+            type: "checkbox",
+            name: "formats",
+            message: "Output format(s):",
+            choices: [
+                { name: "JPG", value: "jpg", checked: true },
+                { name: "PNG", value: "png" },
+                { name: "WebP", value: "webp" },
+            ],
+            validate: (v) => v.length > 0 || "Select at least one format",
+        },
+        {
+            type: "number",
+            name: "quality",
+            message: "Quality (1-100):",
+            default: DEFAULTS.quality,
+            validate: (v) => (v >= 1 && v <= 100) || "Enter a value between 1 and 100",
+        },
+        {
+            type: "number",
+            name: "maxWidth",
+            message: "Max width (px):",
+            default: DEFAULTS.maxWidth,
+        },
+        {
+            type: "number",
+            name: "maxHeight",
+            message: "Max height (px):",
+            default: DEFAULTS.maxHeight,
+        },
+    ]);
+};
+
+const getFiles = () =>
+    globby("./input", {
+        expandDirectories: { extensions: ["jpg", "jpeg", "png", "webp"] },
+    });
+
+const compressImage = async (file, format, { quality, maxWidth, maxHeight }) => {
+    const parts = file.split("/");
+    const filename = parts.pop();
+    const name = filename.substring(0, filename.lastIndexOf("."));
+    const dir = parts.slice(1).join("/");
+    const outDir = `./output/${dir}`;
+
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+
+    await sharp(file)
+        .rotate()
+        .resize(maxWidth, maxHeight, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ progressive: true, quality, mozjpeg: true, force: false })
+        .png({ quality, compressionLevel: 9, force: false })
+        .webp({ quality, force: false })
+        .toFile(`${outDir}/${name}.${format}`);
+
+    return `${name}.${format}`;
+};
+
+const run = async () => {
+    const config = await promptConfig();
+    const files = await getFiles();
+
+    if (!files.length) {
+        console.log("No images found in ./input");
+        return;
     }
 
-    // more output options: https://sharp.pixelplumbing.com/api-output
-    await sharp(file)
-        .jpeg({
-            progressive: true,
-            quality: 75,
-            mozjpeg: true,
-            force: false,
-        })
-        .png({
-            progressive: true,
-            quality: 75,
-            compressionLevel: 9,
-            force: false,
-            colors: 256,
-        })
-        .webp({
-            quality: 75,
-            lossless: false,
-            force: false,
-        })
-        .rotate()
-        .resize(1920, 1920, {
-            fit: sharp.fit.inside,
-            withoutEnlargement: true,
-        })
+    console.log(`\nProcessing ${files.length} image(s)...\n`);
 
-        // keep extension
-        // .toFile(`${output}/${dir}/${image}`);
+    await Promise.all(
+        files.flatMap((file) =>
+            config.formats.map(async (format) => {
+                const name = await compressImage(file, format, config);
+                console.log(`optimized: ${name} ✅`);
+            })
+        )
+    );
 
-        // use extensionOutput
-        .toFile(`${output}/${dir}/${removeImageExt[0]}${extensionOutput}`);
-
-    return `optimized: ${image}`;
-}
-
-// compress all images
-const imageCompressor = async () => {
-    const files = await getFiles();
-    Promise.all(
-        files.map(async (file) => {
-            const file1 = await compressImage(file);
-            console.log(`${file1} ✅`);
-        })
-    ).then(() => {
-        console.log("complete 🏁");
-    });
+    console.log("\ncomplete 🏁");
 };
-imageCompressor();
+
+run();
